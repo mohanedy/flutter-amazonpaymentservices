@@ -12,11 +12,7 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
-import android.content.pm.LabeledIntent;
-
-import androidx.annotation.NonNull;
 
 import com.payfort.fortpaymentsdk.FortSdk;
 import com.payfort.fortpaymentsdk.callbacks.FortCallBackManager;
@@ -24,7 +20,6 @@ import com.payfort.fortpaymentsdk.callbacks.FortCallback;
 import com.payfort.fortpaymentsdk.callbacks.FortInterfaces;
 import com.payfort.fortpaymentsdk.callbacks.PayFortCallback;
 import com.payfort.fortpaymentsdk.domain.model.FortRequest;
-import com.payfort.fortpaymentsdk.domain.model.SdkResponse;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -37,49 +32,81 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry;
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener;
 
 /**
  * FlutterAmazonpaymentservicesPlugin
  */
-public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware {
+public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
     private static final String METHOD_CHANNEL_KEY = "flutter_amazonpaymentservices";
     private static final int PAYFORT_REQUEST_CODE = 1166;
-    static FortCallBackManager fortCallback;
+    
+    private FortCallBackManager fortCallback;
     private MethodChannel methodChannel;
-    private static Activity activity;
+    private Activity activity;
     private Constants.ENVIRONMENTS_VALUES mEnvironment;
 
-    @Override
-    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
-        methodChannel = new MethodChannel(binding.getBinaryMessenger(), METHOD_CHANNEL_KEY);
-        methodChannel.setMethodCallHandler(this);
+    // Default constructor required by Flutter
+    public FlutterAmazonpaymentservicesPlugin() {}
 
+    @Override
+    public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+        methodChannel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), METHOD_CHANNEL_KEY);
+        methodChannel.setMethodCallHandler(this);
     }
 
-    public static void registerWith(PluginRegistry.Registrar registrar) {
-        final MethodChannel channel = new MethodChannel(registrar.messenger(), METHOD_CHANNEL_KEY);
-        FlutterAmazonpaymentservicesPlugin handler = new FlutterAmazonpaymentservicesPlugin();
-        handler.methodChannel = channel;
-        activity = registrar.activity();
-        channel.setMethodCallHandler(handler);
+    @Override
+    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        methodChannel.setMethodCallHandler(null);
+        methodChannel = null;
+    }
 
-        registrar.addActivityResultListener((requestCode, resultCode, data) -> {
-            if (requestCode == PAYFORT_REQUEST_CODE )
-                if(data!=null && resultCode == RESULT_OK)
+    @Override
+    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+        activity = binding.getActivity();
+        binding.addActivityResultListener(this);
+    }
+
+    @Override
+    public void onDetachedFromActivityForConfigChanges() {
+        activity = null;
+    }
+
+    @Override
+    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+        activity = binding.getActivity();
+        binding.addActivityResultListener(this);
+    }
+
+    @Override
+    public void onDetachedFromActivity() {
+        activity = null;
+    }
+
+    @Override
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == PAYFORT_REQUEST_CODE) {
+            if (fortCallback != null) {
+                if (data != null && resultCode == RESULT_OK) {
                     fortCallback.onActivityResult(requestCode, resultCode, data);
-                else{
+                } else {
                     Intent intent = new Intent();
-                    intent.putExtra("","");
+                    intent.putExtra("", "");
                     fortCallback.onActivityResult(requestCode, resultCode, intent);
                 }
+            }
             return true;
-        });
-
+        }
+        return false;
     }
 
-
     @Override
-    public void onMethodCall(MethodCall call, Result result) {
+    public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
+        if (activity == null) {
+            result.error("NO_ACTIVITY", "Amazon Payment Services plugin requires a valid activity", null);
+            return;
+        }
+
         switch (call.method) {
             case "normalPay":
                 handleOpenFullScreenPayfort(call, result);
@@ -96,56 +123,6 @@ public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, Method
         }
     }
 
-    @Override
-    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-        methodChannel.setMethodCallHandler(null);
-    }
-
-    @Override
-    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
-        activity = binding.getActivity();
-        binding.addActivityResultListener((requestCode, resultCode, data) -> {
-            if (requestCode == PAYFORT_REQUEST_CODE )
-                if(data!=null && resultCode == RESULT_OK)
-                fortCallback.onActivityResult(requestCode, resultCode, data);
-                else{
-                    Intent intent = new Intent();
-                    intent.putExtra("","");
-                    fortCallback.onActivityResult(requestCode, resultCode, intent);
-                }
-                return true;
-            });
-
-    }
-
-    @Override
-    public void onDetachedFromActivityForConfigChanges() {
-        methodChannel.setMethodCallHandler(null);
-    }
-
-    @Override
-    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
-        activity = binding.getActivity();
-        binding.addActivityResultListener((requestCode, resultCode, data) -> {
-            if (requestCode == PAYFORT_REQUEST_CODE )
-                if(data!=null && resultCode == RESULT_OK)
-                    fortCallback.onActivityResult(requestCode, resultCode, data);
-                else{
-                    Intent intent = new Intent();
-                    intent.putExtra("","");
-                    fortCallback.onActivityResult(requestCode, resultCode, intent);
-                }
-            return true;
-        });
-
-    }
-
-    @Override
-    public void onDetachedFromActivity() {
-        activity = null;
-
-    }
-
     private void handleValidateAPI(MethodCall call, Result result) {
         if (call.argument("environmentType").toString().equals("production"))
             mEnvironment = Constants.ENVIRONMENTS_VALUES.PRODUCTION;
@@ -158,7 +135,7 @@ public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, Method
         FortSdk.getInstance().validate(activity, FortSdk.ENVIRONMENT.TEST, fortRequest, new PayFortCallback() {
             @Override
             public void startLoading() {
-
+                // Implement if needed
             }
 
             @Override
@@ -169,8 +146,6 @@ public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, Method
             @Override
             public void onFailure(@NonNull Map<String, ?> fortResponseMap, @NonNull Map<String, ?> map1) {
                 result.error("onFailure", "onFailure", fortResponseMap);
-
-
             }
         });
     }
@@ -190,6 +165,7 @@ public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, Method
 
             if (fortCallback == null)
                 fortCallback = FortCallback.Factory.create();
+                
             FortSdk.getInstance().registerCallback(activity, fortRequest, mEnvironment.getSdkEnvironemt(), PAYFORT_REQUEST_CODE, fortCallback, true, new FortInterfaces.OnTnxProcessed() {
                 @Override
                 public void onCancel(Map<String, Object> requestParamsMap, Map<String, Object> responseMap) {
@@ -212,5 +188,4 @@ public class FlutterAmazonpaymentservicesPlugin implements FlutterPlugin, Method
             result.error("onFailure", "onFailure", errorDetails);
         }
     }
-
 }
